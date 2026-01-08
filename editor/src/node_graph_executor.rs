@@ -201,12 +201,13 @@ impl NodeGraphExecutor {
 			ExportBounds::Artboard(id) => document.metadata().bounding_box_document(id),
 		}
 		.ok_or_else(|| "No bounding box".to_string())?;
-		let resolution = (bounds[1] - bounds[0]).round().as_uvec2();
+		let base_resolution = (bounds[1] - bounds[0]).round().as_uvec2();
+		let scaled_resolution = (base_resolution.as_dvec2() * export_config.scale_factor).round().as_uvec2();
 		let transform = DAffine2::from_translation(bounds[0]).inverse();
 
 		let render_config = RenderConfig {
 			viewport: Footprint {
-				resolution,
+				resolution: scaled_resolution,
 				transform,
 				..Default::default()
 			},
@@ -218,7 +219,7 @@ impl NodeGraphExecutor {
 			hide_artboards: export_config.transparent_background,
 			for_export: true,
 		};
-		export_config.size = resolution.as_dvec2();
+		export_config.size = base_resolution.as_dvec2();
 
 		// Execute the node graph
 		self.runtime_io
