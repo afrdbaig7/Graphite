@@ -389,10 +389,9 @@
 		// We ignore the first event invocation's `e.movementX` value because it's unreliable.
 		// In both Chrome and Firefox (tested on Windows 10), the first `e.movementX` value is occasionally a very large number
 		// (around positive 1000, even if movement was in the negative direction). This seems to happen more often if the movement is rapid.
-		// TODO: On rarer occasions, it isn't sufficient to ignore just the first event, so this solution is imperfect.
-		// TODO: Using a counter to ignore more frames helps progressively decrease—but not eliminate—the issue, but it makes drag initiation feel delayed so we don't do that.
-		// TODO: A better solution will need to discard outlier movement values across multiple frames by basically implementing a time-series data analysis filtering algorithm.
-		let ignoredFirstMovement = false;
+		// bug in chrome/firefox where the first few frames give huge movement numbers
+		// so we have to ignore them or the slider jumps way off
+		let dragFrames = 0;
 
 		const pointerUp = () => {
 			// Confirm on release by setting the reset value to the current value, so once the pointer lock ends,
@@ -421,20 +420,29 @@
 				return;
 			}
 
+			dragFrames++;
+
+			// ignore the first frame always
+			if (dragFrames === 1) return;
+			// and ignore the next few if they are outliers (glitches)
+			if (dragFrames < 5 && Math.abs(e.movementX) > 100) return;
+
 			// Calculate and then update the dragged value offset, slowed down by 10x when Shift is held.
-			if (ignoredFirstMovement && initialValueBeforeDragging !== undefined) {
+			if (initialValueBeforeDragging !== undefined) {
 				pointerLockMoveUpdate(e.movementX, e.shiftKey, e.ctrlKey, initialValueBeforeDragging);
 			}
-			ignoredFirstMovement = true;
 		};
 		// On desktop we don't get `pointermove` events while in pointer lock (cef doesn't support pointer lock).
 		// We have to listen for our custom `pointerlockmove` events instead.
 		const pointerLockMove = (e: Event) => {
-			if (ignoredFirstMovement && initialValueBeforeDragging !== undefined && e instanceof CustomEvent) {
+			if (initialValueBeforeDragging !== undefined && e instanceof CustomEvent) {
 				const delta = (e.detail as { x: number }).x;
+				
+				// same fix here
+				if (dragFrames < 5 && Math.abs(delta) > 100) return;
+				
 				pointerLockMoveUpdate(delta, shiftKeyDown, ctrlKeyDown, initialValueBeforeDragging);
 			}
-			ignoredFirstMovement = true;
 		};
 		const pointerLockChange = () => {
 			// Do nothing if we just entered, rather than exited, pointer lock.
