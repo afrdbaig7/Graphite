@@ -271,12 +271,17 @@ impl MessageHandler<DocumentMessage, DocumentMessageContext<'_>> for DocumentMes
 				let mut graph_operation_message_handler = GraphOperationMessageHandler {};
 				graph_operation_message_handler.process_message(message, responses, context);
 			}
-			DocumentMessage::AlignSelectedLayers { axis, aggregate } => {
+			DocumentMessage::AlignSelectedLayers { axis, aggregate, align_to_artboard } => {
 				let axis = match axis {
 					AlignAxis::X => DVec2::X,
 					AlignAxis::Y => DVec2::Y,
 				};
-				let Some(combined_box) = self.network_interface.selected_layers_artwork_bounding_box_viewport() else {
+				let combined_box = if align_to_artboard {
+					self.selected_layers_shared_artboard_bounding_box_viewport()
+				} else {
+					self.network_interface.selected_layers_artwork_bounding_box_viewport()
+				};
+				let Some(combined_box) = combined_box else {
 					return;
 				};
 
@@ -1474,6 +1479,32 @@ impl MessageHandler<DocumentMessage, DocumentMessageContext<'_>> for DocumentMes
 }
 
 impl DocumentMessageHandler {
+	fn selected_layers_shared_artboard_bounding_box_viewport(&self) -> Option<[DVec2; 2]> {
+		let selected_nodes = self.network_interface.selected_nodes();
+		let mut selected_layers = selected_nodes.selected_unlocked_layers(&self.network_interface).peekable();
+		selected_layers.peek()?;
+
+		let mut shared_artboard = None;
+
+		for layer in selected_layers {
+			let layer_artboard = if self.network_interface.is_artboard(&layer.to_node(), &[]) {
+				Some(layer)
+			} else {
+				layer
+					.ancestors(self.metadata())
+					.find(|ancestor| *ancestor != LayerNodeIdentifier::ROOT_PARENT && self.network_interface.is_artboard(&ancestor.to_node(), &[]))
+			};
+
+			match (shared_artboard, layer_artboard) {
+				(None, Some(artboard)) => shared_artboard = Some(artboard),
+				(Some(shared_artboard), Some(artboard)) if shared_artboard == artboard => {}
+				_ => return None,
+			}
+		}
+
+		shared_artboard.and_then(|artboard| self.metadata().bounding_box_viewport(artboard))
+	}
+
 	/// Runs an intersection test with all layers and a viewport space quad
 	pub fn intersect_quad<'a>(&'a self, viewport_quad: graphene_std::renderer::Quad, viewport: &ViewportMessageHandler) -> impl Iterator<Item = LayerNodeIdentifier> + use<'a> {
 		let document_to_viewport = self.navigation_handler.calculate_offset_transform(viewport.center_in_viewport_space().into(), &self.document_ptz);
